@@ -163,7 +163,7 @@ int main(int argc, char **argv)
   p= strrchr(mysqld_path, FN_LIBCHAR);
   if (p)
   {
-    strcpy(p, "\\mysqld.exe");
+    strcpy(p, "\\mariadbd.exe");
   }
 
   if ((error= handle_options(&argc, &argv, my_long_options, get_one_option)))

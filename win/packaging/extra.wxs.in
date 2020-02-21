@@ -486,7 +486,7 @@
       </Component>
 
       <!-- add reference so mysql client won't get uninstalled and we have a shortcut pointing to nowhere-->
-      <ComponentRef Id="C.bin.mysql.exe"/>
+      <ComponentRef Id="C.bin.mariadb.exe"/>
 
       <Component Id="c.shortcuts.commandline" Guid="*" Directory="ShortcutFolder">
         <RegistryValue
@@ -528,10 +528,10 @@
       AllowAdvertise='no'
       Level='1'
       Display='hidden'>
-      <ComponentRef Id='C.bin.mysql.exe'/>
-      <ComponentRef Id='C.bin.mysqladmin.exe'/>
-      <ComponentRef Id='C.bin.mysql_upgrade.exe'/>
-      <ComponentRef Id='C.bin.mysqlcheck.exe'/>
+      <ComponentRef Id='C.bin.mariadb.exe'/>
+      <ComponentRef Id='C.bin.mariadb_admin.exe'/>
+      <ComponentRef Id='C.bin.mariadb_upgrade.exe'/>
+      <ComponentRef Id='C.bin.mariadb_check.exe'/>
       <Component Id="c.shortcuts.commandprompt.nodb"  Guid="*"  Directory="ShortcutFolder" Transitive="yes">
         <Condition>NOT SERVICENAME</Condition>
         <RegistryValue
@@ -621,7 +621,7 @@
     <CustomAction Id='PresetDatabaseProperties' BinaryKey='wixca.dll' DllEntry='PresetDatabaseProperties' />
     <CustomAction Id="CreateDatabaseCommand" Property="CreateDatabase"
     Value=
-    "&quot;[#F.bin.mysql_install_db.exe]&quot;  &quot;--service=[SERVICENAME]&quot; --port=[PORT] --innodb-page-size=[PAGESIZE] &quot;--password=[ESCAPEDPASSWORD]&quot; &quot;--datadir=[DATADIR]\&quot; [SKIPNETWORKING] [ALLOWREMOTEROOTACCESS] [DEFAULTUSER] --verbose-bootstrap"
+    "&quot;[#F.bin.mariadb_install_db.exe]&quot;  &quot;--service=[SERVICENAME]&quot; --port=[PORT] --innodb-page-size=[PAGESIZE] &quot;--password=[ESCAPEDPASSWORD]&quot; &quot;--datadir=[DATADIR]\&quot; [SKIPNETWORKING] [ALLOWREMOTEROOTACCESS] [DEFAULTUSER] --verbose-bootstrap"
      Execute="immediate"
      HideTarget="yes"
      />
@@ -633,7 +633,7 @@
     <CustomAction Id="CreateDatabaseRollback" BinaryKey="wixca.dll" DllEntry="CreateDatabaseRollback"
         Execute="rollback" Return="check" Impersonate="no"/>
     <UI>
-      <ProgressText Action="CreateDatabase">Running mysql_install_db.exe</ProgressText>
+      <ProgressText Action="CreateDatabase">Running mariadb-install-db.exe</ProgressText>
     </UI>
 
     <!-- Error injection script activated by TEST_FAIL=1 passed to msiexec (to see how good custom action rollback works)  -->

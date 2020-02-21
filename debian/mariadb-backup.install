@@ -1,4 +1,3 @@
 usr/bin/mariabackup
 usr/bin/mbstream
 usr/share/man/man1/mariabackup.1
-usr/share/man/man1/mariadb-backup.1

@@ -1,5 +1,5 @@
 # Copyright (c) 2009, 2010, Oracle and/or its affiliates. All rights reserved.
-# 
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation; version 2 of the License.
@@ -36,7 +36,7 @@ FUNCTION (MYSQL_ADD_EXECUTABLE)
   )
   LIST(GET ARG_UNPARSED_ARGUMENTS 0 target)
   LIST(REMOVE_AT  ARG_UNPARSED_ARGUMENTS 0)
-  
+
   SET(sources ${ARG_UNPARSED_ARGUMENTS})
   ADD_VERSION_INFO(${target} EXECUTABLE sources)
 
@@ -62,7 +62,20 @@ FUNCTION (MYSQL_ADD_EXECUTABLE)
   ELSE()
     UNSET(EXCLUDE_FROM_ALL)
   ENDIF()
-  ADD_EXECUTABLE(${target} ${WIN32} ${MACOSX_BUNDLE} ${EXCLUDE_FROM_ALL} ${sources})
+
+  # set name of binary
+  list(FIND MARIADB_SYMLINK_TOS ${target} _index)
+
+  if (${_index} GREATER -1)
+    list(GET MARIADB_SYMLINK_FROMS ${_index} mariadbname)
+  endif()
+
+  IF(NOT ${mariadbname} STREQUAL "")
+    ADD_EXECUTABLE(${mariadbname} ${WIN32} ${MACOSX_BUNDLE} ${EXCLUDE_FROM_ALL} ${sources})
+    SET_TARGET_PROPERTIES(${mariadbname} PROPERTIES OUTPUT_NAME ${mariadbname})
+  ELSE()
+    ADD_EXECUTABLE(${target} ${WIN32} ${MACOSX_BUNDLE} ${EXCLUDE_FROM_ALL} ${sources})
+  ENDIF()
 
   # tell CPack where to install
   IF(NOT ARG_EXCLUDE_FROM_ALL)
@@ -79,7 +92,12 @@ FUNCTION (MYSQL_ADD_EXECUTABLE)
     IF (COMP MATCHES ${SKIP_COMPONENTS})
       RETURN()
     ENDIF()
-    MYSQL_INSTALL_TARGETS(${target} DESTINATION ${ARG_DESTINATION} COMPONENT ${COMP})
+
+    IF(NOT ${mariadbname} STREQUAL "")
+      MYSQL_INSTALL_TARGETS(${mariadbname} DESTINATION ${ARG_DESTINATION} COMPONENT ${COMP})
+    ELSE()
+      MYSQL_INSTALL_TARGETS(${target} DESTINATION ${ARG_DESTINATION} COMPONENT ${COMP})
+    ENDIF()
   ENDIF()
 
   # create mariadb named symlink
