@@ -387,7 +387,7 @@ SELECT * FROM City
 EXPLAIN
 SELECT * FROM City 
   WHERE ((Population > 101000 AND Population < 103000) OR Name LIKE 'P%')
-        AND Country='FIN';
+        AND Country='EST';
 
 # The following 4 queries check that the plans
 # for the previous 2 plans are valid
@@ -628,7 +628,7 @@ SELECT * FROM City
 
 
 #
-# LP bug #954262: index merge oover long disjunction in WHERE    
+# LP bug #954262: index merge over long disjunction in WHERE    
 #  
 
 set @save_optimizer_switch=@@optimizer_switch;
@@ -667,6 +667,7 @@ let $cond =
 eval
 EXPLAIN SELECT Name, Country, Population FROM City WHERE
 $cond;
+--sorted_result
 eval 
 SELECT Name, Country, Population FROM City WHERE
 $cond;
@@ -676,6 +677,7 @@ set optimizer_switch='index_merge=off';
 eval
 EXPLAIN SELECT Name, Country, Population FROM City WHERE
 $cond;
+--sorted_result
 eval
 SELECT Name, Country, Population FROM City WHERE
 $cond;

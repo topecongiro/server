@@ -121,9 +121,8 @@ explain select * from t1 where pk1 != 0  and key1 = 1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 1000,
-                        "cost": 206.39,
-                        "chosen": false,
-                        "cause": "cost"
+                        "cost": 201.39,
+                        "chosen": true
                       },
                       {
                         "index": "key1",
@@ -132,7 +131,7 @@ explain select * from t1 where pk1 != 0  and key1 = 1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 1,
-                        "cost": 2.3751,
+                        "cost": 1.3751,
                         "chosen": true
                       }
                     ],
@@ -155,7 +154,7 @@ explain select * from t1 where pk1 != 0  and key1 = 1	{
                         "cause": "cost"
                       },
                       "chosen": false,
-                      "cause": "too few indexes to merge"
+                      "cause": "cost"
                     },
                     "analyzing_index_merge_union": []
                   },
@@ -167,7 +166,7 @@ explain select * from t1 where pk1 != 0  and key1 = 1	{
                       "ranges": ["(1) <= (key1) <= (1)"]
                     },
                     "rows_for_plan": 1,
-                    "cost_for_plan": 2.3751,
+                    "cost_for_plan": 1.3751,
                     "chosen": true
                   }
                 }

@@ -2069,8 +2069,8 @@ union
 ( select * from t1
 where (f1 is null and f2 is null) and (f2 between 'a' and 'z' or f1 in ('a')));
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
-1	PRIMARY	t1	index_merge	f1,f2	f1,f2	13,33	NULL	1	Using intersect(f1,f2); Using where
-2	UNION	t1	index_merge	f1,f2	f1,f2	13,33	NULL	1	Using intersect(f1,f2); Using where
+1	PRIMARY	t1	range|filter	f1,f2	f1|f1	13|13	NULL	1 (2%)	Using index condition; Using where; Using rowid filter
+2	UNION	t1	range|filter	f1,f2	f1|f1	13|13	NULL	1 (2%)	Using index condition; Using where; Using rowid filter
 NULL	UNION RESULT	<union1,2>	ALL	NULL	NULL	NULL	NULL	NULL	
 explain format=json ( select * from t1
 where (f1 is null and f2 is null) and (f2 between 'a' and 'z' or f1 in ('a')))
@@ -2089,24 +2089,23 @@ EXPLAIN
             "select_id": 1,
             "table": {
               "table_name": "t1",
-              "access_type": "index_merge",
+              "access_type": "range",
               "possible_keys": ["f1", "f2"],
-              "key_length": "13,33",
-              "index_merge": {
-                "intersect": {
-                  "range": {
-                    "key": "f1",
-                    "used_key_parts": ["f1"]
-                  },
-                  "range": {
-                    "key": "f2",
-                    "used_key_parts": ["f2"]
-                  }
-                }
+              "key": "f1",
+              "key_length": "13",
+              "used_key_parts": ["f1"],
+              "rowid_filter": {
+                "range": {
+                  "key": "f1",
+                  "used_key_parts": ["f1"]
+                },
+                "rows": 1,
+                "selectivity_pct": 1.5873
               },
               "rows": 1,
               "filtered": 1.5873,
-              "attached_condition": "t1.f1 is null and t1.f2 is null and (t1.f2 between 'a' and 'z' or t1.f1 = 'a')"
+              "index_condition": "t1.f1 is null",
+              "attached_condition": "t1.f2 is null and (t1.f2 between 'a' and 'z' or t1.f1 = 'a')"
             }
           }
         },
@@ -2116,24 +2115,23 @@ EXPLAIN
             "operation": "UNION",
             "table": {
               "table_name": "t1",
-              "access_type": "index_merge",
+              "access_type": "range",
               "possible_keys": ["f1", "f2"],
-              "key_length": "13,33",
-              "index_merge": {
-                "intersect": {
-                  "range": {
-                    "key": "f1",
-                    "used_key_parts": ["f1"]
-                  },
-                  "range": {
-                    "key": "f2",
-                    "used_key_parts": ["f2"]
-                  }
-                }
+              "key": "f1",
+              "key_length": "13",
+              "used_key_parts": ["f1"],
+              "rowid_filter": {
+                "range": {
+                  "key": "f1",
+                  "used_key_parts": ["f1"]
+                },
+                "rows": 1,
+                "selectivity_pct": 1.5873
               },
               "rows": 1,
               "filtered": 1.5873,
-              "attached_condition": "t1.f1 is null and t1.f2 is null and (t1.f2 between 'a' and 'z' or t1.f1 = 'a')"
+              "index_condition": "t1.f1 is null",
+              "attached_condition": "t1.f2 is null and (t1.f2 between 'a' and 'z' or t1.f1 = 'a')"
             }
           }
         }
@@ -2158,7 +2156,7 @@ id	y	x
 explain extended select * from t1 join t2 on t1.id = t2.x where t2.y = 2 and t1.id = 1;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	const	PRIMARY	PRIMARY	4	const	1	100.00	Using index
-1	SIMPLE	t2	index_merge	x,y	y,x	5,5	NULL	1	100.00	Using intersect(y,x); Using where; Using index
+1	SIMPLE	t2	ref	x,y	x	5	const	6	33.33	Using where
 Warnings:
 Note	1003	select 1 AS `id`,`test`.`t2`.`y` AS `y`,`test`.`t2`.`x` AS `x` from `test`.`t1` join `test`.`t2` where `test`.`t2`.`y` = 2 and `test`.`t2`.`x` = 1
 drop table t1, t2;
@@ -2464,7 +2462,7 @@ WHERE 1 = 1 AND domain = 'www.mailhost.i-dev.fr' AND
 timestamp >= DATE_ADD(CURRENT_TIMESTAMP, INTERVAL -1 MONTH)
 ORDER BY timestamp DESC;
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	ref|filter	ixEventWhoisDomainDomain,ixEventWhoisDomainTimestamp	ixEventWhoisDomainDomain|ixEventWhoisDomainTimestamp	767|4	const	2 (14%)	14.29	Using index condition; Using where; Using filesort; Using rowid filter
+1	SIMPLE	t1	range|filter	ixEventWhoisDomainDomain,ixEventWhoisDomainTimestamp	ixEventWhoisDomainTimestamp|ixEventWhoisDomainDomain	4|767	NULL	1 (29%)	28.57	Using where; Using rowid filter
 Warnings:
 Note	1003	select `test`.`t1`.`id` AS `id`,`test`.`t1`.`domain` AS `domain`,`test`.`t1`.`registrant_name` AS `registrant_name`,`test`.`t1`.`registrant_organization` AS `registrant_organization`,`test`.`t1`.`registrant_street1` AS `registrant_street1`,`test`.`t1`.`registrant_street2` AS `registrant_street2`,`test`.`t1`.`registrant_street3` AS `registrant_street3`,`test`.`t1`.`registrant_street4` AS `registrant_street4`,`test`.`t1`.`registrant_street5` AS `registrant_street5`,`test`.`t1`.`registrant_city` AS `registrant_city`,`test`.`t1`.`registrant_postal_code` AS `registrant_postal_code`,`test`.`t1`.`registrant_country` AS `registrant_country`,`test`.`t1`.`registrant_email` AS `registrant_email`,`test`.`t1`.`registrant_telephone` AS `registrant_telephone`,`test`.`t1`.`administrative_name` AS `administrative_name`,`test`.`t1`.`administrative_organization` AS `administrative_organization`,`test`.`t1`.`administrative_street1` AS `administrative_street1`,`test`.`t1`.`administrative_street2` AS `administrative_street2`,`test`.`t1`.`administrative_street3` AS `administrative_street3`,`test`.`t1`.`administrative_street4` AS `administrative_street4`,`test`.`t1`.`administrative_street5` AS `administrative_street5`,`test`.`t1`.`administrative_city` AS `administrative_city`,`test`.`t1`.`administrative_postal_code` AS `administrative_postal_code`,`test`.`t1`.`administrative_country` AS `administrative_country`,`test`.`t1`.`administrative_email` AS `administrative_email`,`test`.`t1`.`administrative_telephone` AS `administrative_telephone`,`test`.`t1`.`technical_name` AS `technical_name`,`test`.`t1`.`technical_organization` AS `technical_organization`,`test`.`t1`.`technical_street1` AS `technical_street1`,`test`.`t1`.`technical_street2` AS `technical_street2`,`test`.`t1`.`technical_street3` AS `technical_street3`,`test`.`t1`.`technical_street4` AS `technical_street4`,`test`.`t1`.`technical_street5` AS `technical_street5`,`test`.`t1`.`technical_city` AS `technical_city`,`test`.`t1`.`technical_postal_code` AS `technical_postal_code`,`test`.`t1`.`technical_country` AS `technical_country`,`test`.`t1`.`technical_email` AS `technical_email`,`test`.`t1`.`technical_telephone` AS `technical_telephone`,`test`.`t1`.`json` AS `json`,`test`.`t1`.`timestamp` AS `timestamp` from `test`.`t1` where `test`.`t1`.`domain` = 'www.mailhost.i-dev.fr' and `test`.`t1`.`timestamp` >= <cache>(current_timestamp() + interval -1 month) order by `test`.`t1`.`timestamp` desc
 SET optimizer_switch=@save_optimizer_switch;

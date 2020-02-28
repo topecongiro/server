@@ -2044,7 +2044,7 @@ explain  select * from t1 where a=1 and b=2 order by c limit 1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 180,
-                        "cost": 231.72,
+                        "cost": 225.72,
                         "chosen": true
                       },
                       {
@@ -2054,7 +2054,7 @@ explain  select * from t1 where a=1 and b=2 order by c limit 1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 21,
-                        "cost": 27.445,
+                        "cost": 26.445,
                         "chosen": true
                       }
                     ],
@@ -2071,7 +2071,7 @@ explain  select * from t1 where a=1 and b=2 order by c limit 1	{
                       "ranges": ["(1,2) <= (a,b) <= (1,2)"]
                     },
                     "rows_for_plan": 21,
-                    "cost_for_plan": 27.445,
+                    "cost_for_plan": 26.445,
                     "chosen": true
                   }
                 }
@@ -2226,7 +2226,7 @@ explain  select * from t1 where a=1 and b=2 order by c limit 1	{
                     "using_mrr": false,
                     "index_only": false,
                     "rows": 180,
-                    "cost": 231.72,
+                    "cost": 225.72,
                     "chosen": true
                   }
                 ],
@@ -2243,7 +2243,7 @@ explain  select * from t1 where a=1 and b=2 order by c limit 1	{
                   "ranges": ["(1) <= (a) <= (1)"]
                 },
                 "rows_for_plan": 180,
-                "cost_for_plan": 231.72,
+                "cost_for_plan": 225.72,
                 "chosen": true
               }
             }
@@ -3212,9 +3212,8 @@ explain select * from t1 where pk = 2 and a=5 and b=1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 1,
-                        "cost": 2.3773,
-                        "chosen": false,
-                        "cause": "cost"
+                        "cost": 1.3773,
+                        "chosen": true
                       },
                       {
                         "index": "pk_a",
@@ -3223,7 +3222,7 @@ explain select * from t1 where pk = 2 and a=5 and b=1	{
                         "using_mrr": false,
                         "index_only": false,
                         "rows": 1,
-                        "cost": 2.3783,
+                        "cost": 1.3783,
                         "chosen": false,
                         "cause": "cost"
                       },
@@ -3234,7 +3233,7 @@ explain select * from t1 where pk = 2 and a=5 and b=1	{
                         "using_mrr": false,
                         "index_only": true,
                         "rows": 1,
-                        "cost": 1.1793,
+                        "cost": 0.1793,
                         "chosen": true
                       }
                     ],
@@ -3279,7 +3278,7 @@ explain select * from t1 where pk = 2 and a=5 and b=1	{
                       "ranges": ["(2,5,1) <= (pk,a,b) <= (2,5,1)"]
                     },
                     "rows_for_plan": 1,
-                    "cost_for_plan": 1.1793,
+                    "cost_for_plan": 0.1793,
                     "chosen": true
                   }
                 }
@@ -3694,7 +3693,7 @@ explain delete from t0 where t0.a<3	{
               "using_mrr": false,
               "index_only": false,
               "rows": 3,
-              "cost": 5.007,
+              "cost": 4.007,
               "chosen": true
             }
           ],
@@ -3708,7 +3707,7 @@ explain delete from t0 where t0.a<3	{
             "ranges": ["(NULL) < (a) < (3)"]
           },
           "rows_for_plan": 3,
-          "cost_for_plan": 5.007,
+          "cost_for_plan": 4.007,
           "chosen": true
         }
       }
@@ -3837,7 +3836,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                         "using_mrr": false,
                         "index_only": true,
                         "rows": 3,
-                        "cost": 1.407,
+                        "cost": 0.407,
                         "chosen": true
                       }
                     ],
@@ -3854,7 +3853,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                       "ranges": ["(NULL) < (a) < (3)"]
                     },
                     "rows_for_plan": 3,
-                    "cost_for_plan": 1.407,
+                    "cost_for_plan": 0.407,
                     "chosen": true
                   }
                 }
@@ -3902,7 +3901,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                         "using_mrr": false,
                         "index_only": true,
                         "rows": 3,
-                        "cost": 1.407,
+                        "cost": 0.407,
                         "chosen": true
                       }
                     ],
@@ -3919,7 +3918,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                       "ranges": ["(NULL) < (a) < (3)"]
                     },
                     "rows_for_plan": 3,
-                    "cost_for_plan": 1.407,
+                    "cost_for_plan": 0.407,
                     "chosen": true
                   }
                 }
@@ -3946,20 +3945,20 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                     {
                       "access_type": "range",
                       "resulting_rows": 3,
-                      "cost": 1.407,
+                      "cost": 0.407,
                       "chosen": true
                     }
                   ],
                   "chosen_access_method": {
                     "type": "range",
                     "records": 3,
-                    "cost": 1.407,
+                    "cost": 0.407,
                     "uses_join_buffering": false,
                     "filter_used": false
                   }
                 },
                 "rows_for_plan": 3,
-                "cost_for_plan": 2.007,
+                "cost_for_plan": 1.007,
                 "rest_of_plan": [
                   {
                     "plan_prefix": ["t0"],
@@ -3990,7 +3989,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                       }
                     },
                     "rows_for_plan": 3,
-                    "cost_for_plan": 5.614,
+                    "cost_for_plan": 4.614,
                     "estimated_join_cardinality": 3
                   }
                 ]
@@ -4003,20 +4002,20 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                     {
                       "access_type": "range",
                       "resulting_rows": 3,
-                      "cost": 1.407,
+                      "cost": 0.407,
                       "chosen": true
                     }
                   ],
                   "chosen_access_method": {
                     "type": "range",
                     "records": 3,
-                    "cost": 1.407,
+                    "cost": 0.407,
                     "uses_join_buffering": false,
                     "filter_used": false
                   }
                 },
                 "rows_for_plan": 3,
-                "cost_for_plan": 2.007,
+                "cost_for_plan": 1.007,
                 "rest_of_plan": [
                   {
                     "plan_prefix": ["t1"],
@@ -4047,7 +4046,7 @@ explain delete t0,t1 from t0, t1 where t0.a=t1.a and t1.a<3	{
                       }
                     },
                     "rows_for_plan": 6,
-                    "cost_for_plan": 6.2211,
+                    "cost_for_plan": 5.2211,
                     "pruned_by_cost": true
                   }
                 ]
@@ -7534,7 +7533,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": true,
                 "rows": 1,
-                "cost": 1.1783,
+                "cost": 0.1783,
                 "chosen": true
             }
         ],
@@ -7568,7 +7567,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": true,
                 "rows": 107,
-                "cost": 10.955,
+                "cost": 5.9549,
                 "chosen": true
             }
         ],
@@ -7605,7 +7604,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1000,
-                "cost": 1282.2,
+                "cost": 1253.2,
                 "chosen": true
             }
         ],
@@ -7650,7 +7649,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 4,
-                "cost": 6.2648,
+                "cost": 5.2648,
                 "chosen": true
             }
         ],
@@ -7689,7 +7688,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3797,
+                "cost": 1.3797,
                 "chosen": true
             }
         ],
@@ -7723,7 +7722,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3797,
+                "cost": 1.3797,
                 "chosen": true
             }
         ],
@@ -7765,7 +7764,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3787,
+                "cost": 1.3787,
                 "chosen": true
             }
         ],
@@ -7800,7 +7799,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3785,
+                "cost": 1.3785,
                 "chosen": true
             }
         ],
@@ -7835,7 +7834,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3787,
+                "cost": 1.3787,
                 "chosen": true
             }
         ],
@@ -7873,7 +7872,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.3785,
+                "cost": 1.3785,
                 "chosen": true
             }
         ],
@@ -7914,7 +7913,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 3.5719,
+                "cost": 1.5719,
                 "chosen": true
             }
         ],
@@ -7953,7 +7952,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 2,
-                "cost": 3.6324,
+                "cost": 2.6324,
                 "chosen": true
             }
         ],
@@ -8009,7 +8008,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1000,
-                "cost": 1282.2,
+                "cost": 1253.2,
                 "chosen": true
             }
         ],
@@ -8307,7 +8306,7 @@ JSON_DETAILED(JSON_EXTRACT(trace, '$**.analyzing_range_alternatives'))
                 "using_mrr": false,
                 "index_only": false,
                 "rows": 1,
-                "cost": 2.4265,
+                "cost": 1.4265,
                 "chosen": true
             }
         ],

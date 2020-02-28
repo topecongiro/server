@@ -14210,7 +14210,8 @@ void cost_group_min_max(TABLE* table, KEY *index_info, uint used_key_parts,
   DBUG_ENTER("cost_group_min_max");
 
   table_records= table->stat_records();
-  keys_per_block= (uint) (table->file->stats.block_size / 2 /
+  /* Assume block is 75 % full */
+  keys_per_block= (uint) (table->file->stats.block_size * 3 / 4 /
                           (index_info->key_length + table->file->ref_length)
                           + 1);
   num_blocks= (ha_rows)(table_records / keys_per_block) + 1;
