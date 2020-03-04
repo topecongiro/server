@@ -602,14 +602,10 @@ struct log_t{
     lsn_t				lsn;
     /** the byte offset of the above lsn */
     lsn_t				lsn_offset;
+    /** main log file */
+    log_file_t				fd;
     /** log data file */
     log_file_t				data_fd;
-    /** mutex protecting appending to fd */
-    alignas(CACHE_LINE_SIZE) ib_mutex_t fd_mutex;
-    /** write position of fd */
-    os_offset_t fd_offset;
-    /** main log file */
-    log_file_t fd;
 
   public:
     /** used only in recovery: recovery scan succeeded up to this
@@ -680,13 +676,11 @@ struct log_t{
     void create();
 
     /** Close the redo log buffer. */
-    void close() { close_files(); mutex_free(&fd_mutex); }
+    void close() { close_files(); }
     void set_lsn(lsn_t a_lsn);
     lsn_t get_lsn() const { return lsn; }
     void set_lsn_offset(lsn_t a_lsn);
     lsn_t get_lsn_offset() const { return lsn_offset; }
-
-    dberr_t append(span<const byte> buf) noexcept;
   } log;
 
 	/** The fields involved in the log buffer flush @{ */
@@ -815,8 +809,6 @@ public:
 
   /** Shut down the redo log subsystem. */
   void close();
-
-  dberr_t append(span<const byte> buf) noexcept { return log.append(buf); }
 };
 
 /** Redo log system */
@@ -897,19 +889,9 @@ class redo_t
   static const unsigned BIT_SET= 1;
   static const unsigned BIT_UNSET= 0;
 
-  static const size_t MAIN_FILE_HEADER_SIZE = 512;
   static const size_t CHECKPOINT_SIZE=
-      /* type */ 1 + /* checkpoint number */ 8 + /* data file offset */ 8 +
-      /* sequence bit */ 1;
-
-  enum class record_type_t : byte
-  {
-    CHECKPOINT= 0,
-    FILE_OPERATION= 1,
-  };
-
-  /** Number of the next checkpoint to append */
-  uint64_t m_checkpoint = 0;
+    /* type&length */ 1 + /* LSN */ 8 + /* sequence bit & byte offset */ 6 +
+    /* CRC-32C */ 4;
 
   log_file_t m_main_file;
   os_offset_t m_main_file_size;
@@ -936,20 +918,18 @@ public:
   /** Calls fdatasync() or similar */
   dberr_t flush_data() { return m_data_file.flush_data_only(); }
 
-  dberr_t append_checkpoint_durable();
-  dberr_t append_file_operations_durable(const mtr_buf_t &payload);
+  dberr_t append_checkpoint_durable(lsn_t lsn);
+  dberr_t append_file_operations_durable(span<const byte> buf);
 
   /** skip_bit = 1 */
   dberr_t skip_bytes(size_t size) { return DB_SUCCESS; }
-
-  static std::array<byte, MAIN_FILE_HEADER_SIZE> get_header();
 
 private:
   void flip_sequence_bit() { m_sequence_bit= ~m_sequence_bit; }
 
   static dberr_t append_checkpoint_durable_impl(log_file_t &file,
                                                 os_offset_t tail,
-                                                uint64_t checkpoint,
+                                                lsn_t lsn,
                                                 os_offset_t data_file_offset,
                                                 byte sequence_bit);
 

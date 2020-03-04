@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2014, 2016, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2017, 2020, MariaDB Corporation.
+Copyright (c) 2017, 2018, MariaDB Corporation.
 
 Portions of this file contain modifications contributed and copyrighted by
 Google, Inc. Those modifications are gratefully acknowledged and are described
@@ -470,7 +470,6 @@ LatchDebug::LatchDebug()
 	LEVEL_MAP_INSERT(SYNC_FTS_CACHE_INIT);
 	LEVEL_MAP_INSERT(SYNC_RECV);
 	LEVEL_MAP_INSERT(SYNC_LOG_FLUSH_ORDER);
-	LEVEL_MAP_INSERT(SYNC_LOG_FILE_OP);
 	LEVEL_MAP_INSERT(SYNC_LOG);
 	LEVEL_MAP_INSERT(SYNC_LOG_WRITE);
 	LEVEL_MAP_INSERT(SYNC_PAGE_CLEANER);
@@ -752,7 +751,6 @@ LatchDebug::check_order(
 	case SYNC_FTS_CACHE:
 	case SYNC_FTS_CACHE_INIT:
 	case SYNC_PAGE_CLEANER:
-	case SYNC_LOG_FILE_OP:
 	case SYNC_LOG:
 	case SYNC_LOG_WRITE:
 	case SYNC_LOG_FLUSH_ORDER:
@@ -1327,8 +1325,6 @@ sync_latch_meta_init()
 
 	LATCH_ADD_MUTEX(IBUF_PESSIMISTIC_INSERT, SYNC_IBUF_PESS_INSERT_MUTEX,
 			ibuf_pessimistic_insert_mutex_key);
-
-	LATCH_ADD_MUTEX(LOG_FILE_OP, SYNC_LOG_FILE_OP, log_sys_file_mutex_key);
 
 	LATCH_ADD_MUTEX(LOG_SYS, SYNC_LOG, log_sys_mutex_key);
 

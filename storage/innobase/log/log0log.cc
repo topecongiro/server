@@ -730,8 +730,6 @@ void log_t::file::open_files(std::string path)
   if (const dberr_t err= fd.open(srv_read_only_mode))
     ib::fatal() << "open(" << fd.get_path() << ") returned " << err;
 
-  fd_offset= os_file_get_size(fd.get_path().c_str()).m_total_size;
-
   data_fd= log_file_t(get_log_file_path(LOG_DATA_FILE_NAME));
   bool exists;
   os_file_type_t type;
@@ -812,19 +810,6 @@ void log_t::file::create()
   file_size= srv_log_file_size;
   lsn= 1;
   lsn_offset= 0;
-
-  mutex_create(LATCH_ID_LOG_FILE_OP, &fd_mutex);
-  fd_offset= 0;
-}
-
-dberr_t log_t::file::append(span<const byte> buf) noexcept
-{
-  mutex_enter(&fd_mutex);
-  dberr_t err= fd.write(fd_offset, buf);
-  if (err == DB_SUCCESS)
-    fd_offset+= buf.size();
-  mutex_exit(&fd_mutex);
-  return err;
 }
 
 /** Update the log block checksum. */
@@ -1320,23 +1305,10 @@ func_exit:
 
   DBUG_PRINT("ib_log", ("writing checkpoint at " LSN_PF, flush_lsn));
 
-  byte *buf= &log_sys.checkpoint_buf[1 + 8];
-  /* FIXME: add sequence bit */
-  mach_write_to_6(buf, log_sys.log.calc_lsn_offset(flush_lsn));
   ++log_sys.n_pending_checkpoint_writes;
   log_mutex_exit();
-
-  log_sys.checkpoint_buf[0]= FILE_CHECKPOINT | (8 + 6);
-  mach_write_to_8(&log_sys.checkpoint_buf[1], flush_lsn);
-  buf+= 6;
-  ut_ad(buf == &log_sys.checkpoint_buf[15]);
-  mach_write_to_4(buf, ut_crc32(log_sys.checkpoint_buf, 15));
-  buf+= 4;
-  log_sys.append({log_sys.checkpoint_buf, buf});
-  redo::new_redo.append_checkpoint_durable();
-
+  redo::new_redo.append_checkpoint_durable(flush_lsn);
   log_mutex_enter();
-
   --log_sys.n_pending_checkpoint_writes;
   ut_ad(log_sys.n_pending_checkpoint_writes == 0);
   log_sys.n_log_ios++;
@@ -1913,28 +1885,104 @@ dberr_t redo_t::create_files(os_offset_t data_file_size)
 
 dberr_t redo_t::initialize_files()
 {
+  ut_ad(log_sys.log.format == log_t::FORMAT_10_5);
+  ut_ad(log_sys.lsn);
+  ut_ad(!(srv_log_file_size & 511));
+  static_assert(OS_FILE_LOG_BLOCK_SIZE >= 512, "compatibility");
+  static_assert(!(OS_FILE_LOG_BLOCK_SIZE & 511), "compatibility");
+  ut_ad(srv_log_file_size <= 1ULL << 47);
+
+  byte *buf= log_sys.buf;
+  memset_aligned<OS_FILE_LOG_BLOCK_SIZE>(buf, 0, OS_FILE_LOG_BLOCK_SIZE);
+  mach_write_to_4(buf + log_header::FORMAT, log_sys.log.format);
+  mach_write_to_4(buf + log_header::KEY_VERSION, log_sys.log.key_version);
+  /* Write sequence_bit=1 so that the all-zero ib_logdata file will
+  appear empty. */
+  mach_write_to_8(buf + log_header::SIZE, 1ULL << 47 | srv_log_file_size);
+  memcpy(buf + log_header::CREATOR, log_header::CREATOR_CURRENT,
+         sizeof log_header::CREATOR_CURRENT);
+  static_assert(log_header::CREATOR_END - log_header::CREATOR ==
+                sizeof log_header::CREATOR_CURRENT, "compatibility");
+  ut_ad(!srv_encrypt_log); /* FIXME: write encryption parameters! */
+  log_block_set_checksum(buf, log_block_calc_checksum_crc32(buf));
+
+  /* Write FILE_ID records for any non-predefined tablespaces. */
+  mutex_enter(&fil_system.mutex);
+  for (fil_space_t *space= UT_LIST_GET_FIRST(fil_system.space_list); space;
+       space= UT_LIST_GET_NEXT(space_list, space))
+  {
+    if (is_predefined_tablespace(space->id))
+      continue;
+    const char *path= space->chain.start->name;
+    /* The following is based on file_op() */
+    const size_t len= strlen(path);
+    ut_ad(len > 0);
+    const size_t size= 1 + 3/*length*/ + 5/*space_id*/ + 4/*CRC-32C*/ + len;
+
+    if (UNIV_UNLIKELY(buf + size > log_sys.buf + srv_log_buffer_size))
+    {
+      mutex_exit(&fil_system.mutex);
+      return DB_OUT_OF_MEMORY;
+    }
+
+    byte *end= buf + 1;
+    end= mlog_encode_varint(end, space->id);
+    if (UNIV_LIKELY(end + len >= &buf[16]))
+    {
+      *buf= FILE_ID;
+      size_t total_len= len + end - buf - 15;
+      if (total_len >= MIN_3BYTE)
+        total_len+= 2;
+      else if (total_len >= MIN_2BYTE)
+        total_len++;
+      end= mlog_encode_varint(buf + 1, total_len);
+      end= mlog_encode_varint(buf, space->id);
+    }
+    else
+    {
+      *buf= FILE_ID | static_cast<byte>(end + len - &buf[1]);
+      ut_ad(*buf & 15);
+    }
+
+    memcpy(end, path, len);
+    end+= len;
+    mach_write_to_4(end, ut_crc32(buf, end - buf));
+    end+= 4;
+    ut_ad(end <= &buf[size]);
+  }
+  mutex_exit(&fil_system.mutex);
+
+  /* @see redo_t::append_checkpoint_durable_impl() */
+  *buf= FILE_CHECKPOINT | (8 + 6);
+  mach_write_to_8(&buf[1], log_sys.lsn);
+  memset(&buf[1 + 8], 0, 6); /* start offset in ib_logdata */
+  mach_write_to_4(&buf[1 + 8 + 6], ut_crc32(buf, 1 + 8 + 6));
+  buf+= 1 + 8 + 6 + 4;
+
   log_file_t main_file(get_log_file_path(MAIN_FILE_NAME));
   if (dberr_t err= main_file.open(false))
     return err;
 
-  if (dberr_t err= main_file.write(0, get_header()))
-    return err;
-
-  m_checkpoint= 0; // start checkpoint value
-  m_data_file_position= 0;
-  m_sequence_bit= 0;
-
-  if (dberr_t err= append_checkpoint_durable_impl(
-          main_file, MAIN_FILE_HEADER_SIZE, m_checkpoint, m_data_file_position,
-          m_sequence_bit))
   {
-    return err;
+    std::lock_guard<std::mutex> _(m_mutex);
+
+    if (dberr_t err= main_file.write(0, {log_sys.buf,buf}))
+      return err;
+
+    if (!main_file.writes_are_durable())
+      if (dberr_t err= main_file.flush_data_only())
+        return err;
   }
 
   if (dberr_t err= main_file.close())
     return err;
 
-  m_main_file_size= MAIN_FILE_HEADER_SIZE + CHECKPOINT_SIZE;
+  memset_aligned<OS_FILE_LOG_BLOCK_SIZE>(log_sys.buf, 0, srv_log_buffer_size);
+
+  m_data_file_position= 0;
+  m_sequence_bit= 1;
+
+  m_main_file_size= buf - log_sys.buf;
 
   return DB_SUCCESS;
 }
@@ -2007,84 +2055,52 @@ dberr_t redo_t::append_mtr_data(const mtr_buf_t &payload)
   return append_wrapped(v);
 }
 
-dberr_t redo_t::append_checkpoint_durable()
+dberr_t redo_t::append_checkpoint_durable(lsn_t lsn)
 {
   std::lock_guard<std::mutex> _(m_mutex);
 
   if (dberr_t err= append_checkpoint_durable_impl(
-          m_main_file, m_main_file_size, m_checkpoint, m_data_file_position,
+          m_main_file, m_main_file_size, lsn, m_data_file_position,
           m_sequence_bit)) {
     return err;
   }
 
   m_main_file_size+= CHECKPOINT_SIZE;
-  m_checkpoint+= 1;
-
   return DB_SUCCESS;
 }
 
-dberr_t redo_t::append_file_operations_durable(const mtr_buf_t &payload)
+dberr_t redo_t::append_file_operations_durable(span<const byte> buf)
 {
-  const size_t size= payload.size() + /* crc32 */ 4;
-  std::array<byte, 9> buf; // 9 bytes will be enough for all
-  span<byte> header{buf.data(), mlog_encode_varint(buf.data(), size)};
-
-  mtr_functor_t accumulator;
-  std::vector<byte> &v= accumulator.m_buf;
-
-  v.reserve(/* type */ 1 + header.size() + size);
-  v.push_back(static_cast<byte>(record_type_t::FILE_OPERATION));
-  v.insert(v.end(), header.begin(), header.end());
-  payload.for_each_block(accumulator);
-
-  std::array<byte, 4> crc_buf;
-  mach_write_to_4(crc_buf.data(), ut_crc32(v.data(), v.size()));
-  v.insert(v.end(), crc_buf.begin(), crc_buf.end());
-
   std::lock_guard<std::mutex> _(m_mutex);
 
-  if (dberr_t err= m_main_file.write(m_main_file_size, v))
+  if (dberr_t err= m_main_file.write(m_main_file_size, buf))
     return err;
 
   if (!m_main_file.writes_are_durable())
     if (dberr_t err= m_main_file.flush_data_only())
       return err;
 
-  m_main_file_size+= v.size();
+  m_main_file_size+= buf.size();
 
   return DB_SUCCESS;
 }
 
-std::array<byte, redo_t::MAIN_FILE_HEADER_SIZE> redo_t::get_header()
-{
-  std::array<byte, MAIN_FILE_HEADER_SIZE> header= {0};
-  byte *p= header.data();
-
-  mach_write_to_4(p + log_header::FORMAT, log_sys.log.format);
-  mach_write_to_4(p + log_header::KEY_VERSION, log_sys.log.key_version);
-  /* Write sequence_bit=1 so that the all-zero ib_logdata file will
-  appear empty. */
-  mach_write_to_8(p + log_header::SIZE, 1ULL << 47 | srv_log_file_size);
-  memcpy(p + log_header::CREATOR, log_header::CREATOR_CURRENT,
-         sizeof log_header::CREATOR_CURRENT);
-  static_assert(log_header::CREATOR_END - log_header::CREATOR ==
-                sizeof log_header::CREATOR_CURRENT, "compatibility");
-  log_block_set_checksum(p, log_block_calc_checksum_crc32(p));
-
-  return header;
-}
-
 dberr_t redo_t::append_checkpoint_durable_impl(log_file_t &file,
                                                os_offset_t tail,
-                                               uint64_t checkpoint,
-                                               os_offset_t data_file_offset,
+                                               lsn_t lsn,
+                                               uint64_t data_file_offset,
                                                byte sequence_bit)
 {
+  ut_ad(sequence_bit <= 1);
+  ut_ad(data_file_offset < 1ULL << 47);
+
   std::array<byte, CHECKPOINT_SIZE> buf;
-  buf[0] = static_cast<byte>(record_type_t::CHECKPOINT);
-  mach_write_to_8(&buf[1], checkpoint);
-  mach_write_to_8(&buf[1 + 8], data_file_offset);
-  buf[1 + 8 + 8] = sequence_bit;
+  buf[0]= FILE_CHECKPOINT | (8 + 6);
+  mach_write_to_8(&buf[1], lsn);
+  mach_write_to_6(&buf[1 + 8],
+                  uint64_t{sequence_bit} << 47 | data_file_offset);
+  mach_write_to_4(&buf[1 + 8 + 6], ut_crc32(&buf[0], 1 + 8 + 6));
+  static_assert(CHECKPOINT_SIZE == 1 + 8 + 6 + 4, "compatibility");
 
   if (dberr_t err= file.write(tail, buf))
     return err;

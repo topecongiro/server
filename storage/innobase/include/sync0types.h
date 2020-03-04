@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2017, 2020, MariaDB Corporation.
+Copyright (c) 2017, 2018, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -212,7 +212,6 @@ enum latch_level_t {
 	SYNC_FTS_CACHE_INIT,
 	SYNC_RECV,
 	SYNC_LOG_FLUSH_ORDER,
-	SYNC_LOG_FILE_OP,
 	SYNC_LOG,
 	SYNC_LOG_WRITE,
 	SYNC_PAGE_CLEANER,
@@ -302,7 +301,6 @@ enum latch_id_t {
 	LATCH_ID_IBUF_BITMAP,
 	LATCH_ID_IBUF,
 	LATCH_ID_IBUF_PESSIMISTIC_INSERT,
-	LATCH_ID_LOG_FILE_OP,
 	LATCH_ID_LOG_SYS,
 	LATCH_ID_LOG_WRITE,
 	LATCH_ID_LOG_FLUSH_ORDER,
