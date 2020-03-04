@@ -274,10 +274,6 @@ static dberr_t create_log_file(lsn_t lsn, std::string& logfile0)
 	DBUG_EXECUTE_IF("innodb_log_abort_7", return DB_ERROR;);
 	DBUG_PRINT("ib_log", ("After innodb_log_abort_7"));
 
-	if (dberr_t err = create_data_file(srv_log_file_size)) {
-		return err;
-	}
-
 	logfile0 = get_log_file_path(LOG_FILE_NAME_PREFIX)
 			   .append(INIT_LOG_FILE0);
 
@@ -295,7 +291,20 @@ static dberr_t create_log_file(lsn_t lsn, std::string& logfile0)
 	DBUG_EXECUTE_IF("innodb_log_abort_8", return(DB_ERROR););
 	DBUG_PRINT("ib_log", ("After innodb_log_abort_8"));
 
-	/* We did not create the first log file initially as LOG_FILE_NAME, so
+	if (dberr_t err = create_log_file(
+		get_log_file_path(LOG_DATA_FILE_NAME).c_str(),
+		srv_log_file_size)) {
+		return err;
+	}
+
+	if (dberr_t err = redo::redo_t::create_files(srv_log_file_size)) {
+		return err;
+	}
+	if (dberr_t err = redo::new_redo.initialize_files()) {
+		return err;
+	}
+
+	/* We did not create the log file initially as LOG_FILE_NAME, so
 	that crash recovery cannot find it until it has been completed and
 	renamed. */
 
@@ -304,7 +313,9 @@ static dberr_t create_log_file(lsn_t lsn, std::string& logfile0)
 	}
 
 	log_sys.log.open_files(logfile0);
+	redo::new_redo.open_files();
 
+#if 1 // TODO: move to initialize_files() above
   ut_ad(log_sys.log.format == log_t::FORMAT_10_5);
   ut_ad(!(srv_log_file_size & 511));
   static_assert(OS_FILE_LOG_BLOCK_SIZE >= 512, "compatibility");
@@ -382,6 +393,7 @@ static dberr_t create_log_file(lsn_t lsn, std::string& logfile0)
     return error;
 
   memset_aligned<OS_FILE_LOG_BLOCK_SIZE>(log_sys.buf, 0, srv_log_buffer_size);
+#endif
 
   log_mutex_enter();
   ut_d(recv_no_log_write= false);
@@ -1481,6 +1493,7 @@ dberr_t srv_start(bool create_new_db)
 		srv_log_file_found = log_file_found;
 
 		log_sys.log.open_files(get_log_file_path());
+		redo::new_redo.open_files();
 
 		if (!log_set_capacity(srv_log_file_size_requested)) {
 			return(srv_init_abort(DB_ERROR));
@@ -1721,6 +1734,7 @@ file_checked:
 			err = fil_write_flushed_lsn(log_get_lsn());
 			ut_ad(!buf_pool_check_no_pending_io());
 			log_sys.log.close_files();
+			redo::new_redo.close_files();
 			if (err == DB_SUCCESS) {
 				bool trunc = srv_operation
 					== SRV_OPERATION_RESTORE;
@@ -2191,6 +2205,7 @@ void innodb_shutdown()
 #endif /* BTR_CUR_HASH_ADAPT */
 	ibuf_close();
 	log_sys.close();
+	redo::new_redo.close_files();
 	purge_sys.close();
 	trx_sys.close();
 	if (buf_dblwr) {

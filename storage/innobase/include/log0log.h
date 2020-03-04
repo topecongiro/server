@@ -49,13 +49,11 @@ step which modifies the database, is started */
 #define LOG_CHECKPOINT_FREE_PER_THREAD	(4U << srv_page_size_shift)
 #define LOG_CHECKPOINT_EXTRA_FREE	(8U << srv_page_size_shift)
 
-typedef ulint (*log_checksum_func_t)(const byte* log_block);
-
 /** this is where redo log data is stored (no header, no checkpoints) */
 static const char LOG_DATA_FILE_NAME[] = "ib_logdata";
 
 /** creates LOG_DATA_FILE_NAME with specified size */
-dberr_t create_data_file(os_offset_t size);
+dberr_t create_log_file(const char *path, os_offset_t size);
 
 static const char LOG_FILE_NAME_PREFIX[] = "ib_logfile";
 static const char LOG_FILE_NAME[] = "ib_logfile0";
@@ -887,6 +885,81 @@ inline void log_t::file::set_lsn_offset(lsn_t a_lsn) {
 
 /** Release the log sys mutex. */
 #define log_mutex_exit() mutex_exit(&log_sys.mutex)
+
+namespace redo
+{
+
+class redo_t
+{
+  static const char DATA_FILE_NAME[];
+  static const char MAIN_FILE_NAME[];
+
+  static const unsigned BIT_SET= 1;
+  static const unsigned BIT_UNSET= 0;
+
+  static const size_t MAIN_FILE_HEADER_SIZE = 512;
+  static const size_t CHECKPOINT_SIZE=
+      /* type */ 1 + /* checkpoint number */ 8 + /* data file offset */ 8 +
+      /* sequence bit */ 1;
+
+  enum class record_type_t : byte
+  {
+    CHECKPOINT= 0,
+    FILE_OPERATION= 1,
+  };
+
+  /** Number of the next checkpoint to append */
+  uint64_t m_checkpoint = 0;
+
+  log_file_t m_main_file;
+  os_offset_t m_main_file_size;
+
+  log_file_t m_data_file;
+  os_offset_t m_data_file_position;
+  os_offset_t m_data_file_size;
+  unsigned m_sequence_bit : 1;
+
+  std::mutex m_mutex;
+
+public:
+  /** Initialize redo log files */
+  static dberr_t create_files(os_offset_t data_file_size);
+  /** Write initial info to a newly created files */
+  dberr_t initialize_files();
+
+  /** Thread unsafe! */
+  dberr_t open_files();
+  /** Thread unsafe! */
+  dberr_t close_files();
+
+  dberr_t append_mtr_data(const mtr_buf_t &payload);
+  /** Calls fdatasync() or similar */
+  dberr_t flush_data() { return m_data_file.flush_data_only(); }
+
+  dberr_t append_checkpoint_durable();
+  dberr_t append_file_operations_durable(const mtr_buf_t &payload);
+
+  /** skip_bit = 1 */
+  dberr_t skip_bytes(size_t size) { return DB_SUCCESS; }
+
+private:
+  void flip_sequence_bit() { m_sequence_bit= ~m_sequence_bit; }
+
+  static std::array<byte, MAIN_FILE_HEADER_SIZE> get_header();
+
+  static dberr_t append_checkpoint_durable_impl(log_file_t &file,
+                                                os_offset_t tail,
+                                                uint64_t checkpoint,
+                                                os_offset_t data_file_offset,
+                                                byte sequence_bit);
+
+  dberr_t append_wrapped(span<byte> buf);
+  dberr_t read_wrapped(os_offset_t offset, span<byte> buf);
+};
+
+extern redo_t new_redo;
+
+} // namespace redo
 
 #include "log0log.ic"
 

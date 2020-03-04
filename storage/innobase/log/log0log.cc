@@ -1138,6 +1138,7 @@ void log_write_up_to(lsn_t lsn, bool flush_to_disk)
   if (!log_sys.log.data_writes_are_durable())
   {
     log_write_flush_to_disk_low(flush_lsn);
+    redo::new_redo.flush_data();
   }
 
   flush_lock.release(flush_lsn);
@@ -1332,6 +1333,7 @@ func_exit:
   mach_write_to_4(buf, ut_crc32(log_sys.checkpoint_buf, 15));
   buf+= 4;
   log_sys.append({log_sys.checkpoint_buf, buf});
+  redo::new_redo.append_checkpoint_durable();
 
   log_mutex_enter();
 
@@ -1848,16 +1850,15 @@ std::vector<std::string> get_existing_log_files_paths() {
   return result;
 }
 
-dberr_t create_data_file(os_offset_t size)
+dberr_t create_log_file(const char *path, os_offset_t size)
 {
-  ut_ad(size > LOG_MAIN_FILE_SIZE);
+  ut_ad(path);
 
-  const auto path= get_log_file_path(LOG_DATA_FILE_NAME);
-  os_file_delete_if_exists(innodb_log_file_key, path.c_str(), nullptr);
+  os_file_delete_if_exists(innodb_log_file_key, path, nullptr);
 
   bool ret;
   pfs_os_file_t file=
-      os_file_create(innodb_log_file_key, path.c_str(),
+      os_file_create(innodb_log_file_key, path,
                      OS_FILE_CREATE | OS_FILE_ON_ERROR_NO_EXIT, OS_FILE_NORMAL,
                      OS_LOG_FILE, srv_read_only_mode, &ret);
 
@@ -1869,7 +1870,7 @@ dberr_t create_data_file(os_offset_t size)
 
   ib::info() << "Setting log file " << path << " size to " << size << " bytes";
 
-  ret= os_file_set_size(path.c_str(), file, size);
+  ret= os_file_set_size(path, file, size);
   if (!ret)
   {
     os_file_close(file);
@@ -1890,3 +1891,254 @@ dberr_t create_data_file(os_offset_t size)
 
   return DB_SUCCESS;
 }
+
+namespace redo
+{
+
+redo_t new_redo;
+
+const char redo_t::DATA_FILE_NAME[]= "new_ib_logdata";
+const char redo_t::MAIN_FILE_NAME[]= "new_ib_logfile0";
+
+dberr_t redo_t::create_files(os_offset_t data_file_size)
+{
+  if (dberr_t err= create_log_file(get_log_file_path(DATA_FILE_NAME).c_str(),
+                                   data_file_size))
+  {
+    return err;
+  }
+
+  return create_log_file(get_log_file_path(MAIN_FILE_NAME).c_str(), 0);
+}
+
+dberr_t redo_t::initialize_files()
+{
+  log_file_t main_file(get_log_file_path(MAIN_FILE_NAME));
+  if (dberr_t err= main_file.open(false))
+    return err;
+
+  if (dberr_t err= main_file.write(0, get_header()))
+    return err;
+
+  m_checkpoint= 0; // start checkpoint value
+  m_data_file_position= 0;
+  m_sequence_bit= 0;
+
+  if (dberr_t err= append_checkpoint_durable_impl(
+          main_file, MAIN_FILE_HEADER_SIZE, m_checkpoint, m_data_file_position,
+          m_sequence_bit))
+  {
+    return err;
+  }
+
+  if (dberr_t err= main_file.close())
+    return err;
+
+  m_main_file_size= MAIN_FILE_HEADER_SIZE + CHECKPOINT_SIZE;
+
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::open_files()
+{
+  std::string main_file_path= get_log_file_path(MAIN_FILE_NAME);
+  std::string data_file_path= get_log_file_path(DATA_FILE_NAME);
+
+  m_main_file= log_file_t(main_file_path.c_str());
+  m_data_file= log_file_t(data_file_path.c_str());
+
+  if (dberr_t err= m_main_file.open(false))
+    return err;
+  if (dberr_t err= m_data_file.open(false))
+    return err;
+
+  m_main_file_size= os_file_get_size(main_file_path.c_str()).m_total_size;
+  m_data_file_size= os_file_get_size(data_file_path.c_str()).m_total_size;
+  m_data_file_position= 0; // TODO: remove? (must be filled by recovery)
+
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::close_files()
+{
+  if (dberr_t err= m_main_file.close())
+    return err;
+  return m_data_file.close();
+}
+
+struct mtr_functor_t
+{
+  std::vector<byte> m_buf;
+
+  bool operator()(const mtr_buf_t::block_t *block)
+  {
+    m_buf.insert(m_buf.end(), block->begin(), block->end());
+    return true;
+  }
+};
+
+dberr_t redo_t::append_mtr_data(const mtr_buf_t &payload)
+{
+  const uint32_t size= payload.size() + /* crc32 */ 4;
+
+  std::array<byte, 9> buf; // 9 bytes will be enough for everyone
+  span<byte> header{
+      buf.begin(),
+      mlog_encode_varint(buf.data(),
+                         size << 2 /* no skip_bit, no sequence_bit */)};
+
+  mtr_functor_t accumulator;
+  std::vector<byte> &v= accumulator.m_buf;
+  v.reserve(header.size() + size);
+  v.insert(v.end(), header.begin(), header.end());
+  payload.for_each_block(accumulator);
+  std::array<byte, 4> crc_buf;
+  mach_write_to_4(crc_buf.data(), ut_crc32(v.data(), v.size()));
+  v.insert(v.end(), crc_buf.begin(), crc_buf.end());
+
+  std::lock_guard<std::mutex> _(m_mutex);
+
+  // now with real sequence bit (which is mutex protected)
+  const byte skip_bit= 0; // do not skip
+  const byte *header_end=
+      mlog_encode_varint(v.data(), size << 2 | skip_bit << 1 | m_sequence_bit);
+  (void) header_end;
+  ut_ad(header.size() == static_cast<size_t>(header_end - v.data()));
+  return append_wrapped(v);
+}
+
+dberr_t redo_t::append_checkpoint_durable()
+{
+  std::lock_guard<std::mutex> _(m_mutex);
+
+  if (dberr_t err= append_checkpoint_durable_impl(
+          m_main_file, m_main_file_size, m_checkpoint, m_data_file_position,
+          m_sequence_bit)) {
+    return err;
+  }
+
+  m_main_file_size+= CHECKPOINT_SIZE;
+  m_checkpoint+= 1;
+
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::append_file_operations_durable(const mtr_buf_t &payload)
+{
+  const size_t size= payload.size() + /* crc32 */ 4;
+  std::array<byte, 9> buf; // 9 bytes will be enough for all
+  span<byte> header{buf.data(), mlog_encode_varint(buf.data(), size)};
+
+  mtr_functor_t accumulator;
+  std::vector<byte> &v= accumulator.m_buf;
+
+  v.reserve(/* type */ 1 + header.size() + size);
+  v.push_back(static_cast<byte>(record_type_t::FILE_OPERATION));
+  v.insert(v.end(), header.begin(), header.end());
+  payload.for_each_block(accumulator);
+
+  std::array<byte, 4> crc_buf;
+  mach_write_to_4(crc_buf.data(), ut_crc32(v.data(), v.size()));
+  v.insert(v.end(), crc_buf.begin(), crc_buf.end());
+
+  std::lock_guard<std::mutex> _(m_mutex);
+
+  if (dberr_t err= m_main_file.write(m_main_file_size, v))
+    return err;
+
+  if (!m_main_file.writes_are_durable())
+    if (dberr_t err= m_main_file.flush_data_only())
+      return err;
+
+  m_main_file_size+= v.size();
+
+  return DB_SUCCESS;
+}
+
+std::array<byte, redo_t::MAIN_FILE_HEADER_SIZE> redo_t::get_header()
+{
+  std::array<byte, MAIN_FILE_HEADER_SIZE> header= {0};
+  byte *p= header.data();
+  mach_write_to_4(p + LOG_HEADER_FORMAT, srv_encrypt_log
+                                             ? log_t::FORMAT_ENC_10_5
+                                             : log_t::FORMAT_10_5);
+  mach_write_to_4(p + LOG_HEADER_SUBFORMAT, 2);
+  mach_write_to_4(p + LOG_HEADER_START_LSN, 0);
+  strcpy(reinterpret_cast<char *>(p) + LOG_HEADER_CREATOR,
+         LOG_HEADER_CREATOR_CURRENT);
+  log_block_store_checksum(p);
+  return header;
+}
+
+dberr_t redo_t::append_checkpoint_durable_impl(log_file_t &file,
+                                               os_offset_t tail,
+                                               uint64_t checkpoint,
+                                               os_offset_t data_file_offset,
+                                               byte sequence_bit)
+{
+  std::array<byte, CHECKPOINT_SIZE> buf;
+  buf[0] = static_cast<byte>(record_type_t::CHECKPOINT);
+  mach_write_to_8(&buf[1], checkpoint);
+  mach_write_to_8(&buf[1 + 8], data_file_offset);
+  buf[1 + 8 + 8] = sequence_bit;
+
+  if (dberr_t err= file.write(tail, buf))
+    return err;
+
+  if (!file.writes_are_durable())
+    if (dberr_t err= file.flush_data_only())
+      return err;
+
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::append_wrapped(span<byte> buf)
+{
+  ut_ad(m_data_file_position != m_data_file_size);
+  ut_ad(buf.size() < m_data_file_size); // do not bite own tail!
+
+  if (m_data_file_position + buf.size() > m_data_file_size)
+  {
+    os_offset_t tail_length= m_data_file_size - m_data_file_position;
+    if (dberr_t err= m_data_file.write(m_data_file_position,
+                                       buf.subspan(0, tail_length)))
+    {
+      return err;
+    }
+    buf= buf.subspan(tail_length, buf.size() - tail_length);
+    m_data_file_position= 0;
+    flip_sequence_bit();
+  }
+
+  if (dberr_t err= m_data_file.write(m_data_file_position, buf))
+    return err;
+
+  m_data_file_position+= buf.size();
+  if (m_data_file_position == m_data_file_size)
+    m_data_file_position= 0;
+
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::read_wrapped(os_offset_t offset, span<byte> buf)
+{
+  ut_ad(buf.size() < m_data_file_size); // do not bite own tail!
+
+  if (offset + buf.size() > m_data_file_size)
+  {
+    os_offset_t tail_length= m_data_file_size - offset;
+    if (dberr_t err= m_data_file.read(offset, buf.subspan(0, tail_length)))
+    {
+      return err;
+    }
+    buf= buf.subspan(tail_length, buf.size() - tail_length);
+    offset= 0;
+  }
+
+  if (dberr_t err= m_data_file.read(offset, buf))
+    return err;
+
+  return DB_SUCCESS;
+}
+
+} // namespace redo

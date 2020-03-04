@@ -747,7 +747,7 @@ dberr_t recv_sys_t::upgrade_file_format_to_10_5_if_needed()
 
   ut_ad(!log_sys.log.data_is_opened());
 
-  if (dberr_t err= create_data_file(srv_log_file_size))
+  if (dberr_t err= create_log_file(get_log_file_path(LOG_DATA_FILE_NAME).c_str(), srv_log_file_size))
     return err;
 
   // Copy one block from old file to new file.
