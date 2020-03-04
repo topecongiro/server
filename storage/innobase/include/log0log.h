@@ -942,10 +942,10 @@ public:
   /** skip_bit = 1 */
   dberr_t skip_bytes(size_t size) { return DB_SUCCESS; }
 
+  static std::array<byte, MAIN_FILE_HEADER_SIZE> get_header();
+
 private:
   void flip_sequence_bit() { m_sequence_bit= ~m_sequence_bit; }
-
-  static std::array<byte, MAIN_FILE_HEADER_SIZE> get_header();
 
   static dberr_t append_checkpoint_durable_impl(log_file_t &file,
                                                 os_offset_t tail,

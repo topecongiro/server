@@ -2059,14 +2059,18 @@ std::array<byte, redo_t::MAIN_FILE_HEADER_SIZE> redo_t::get_header()
 {
   std::array<byte, MAIN_FILE_HEADER_SIZE> header= {0};
   byte *p= header.data();
-  mach_write_to_4(p + LOG_HEADER_FORMAT, srv_encrypt_log
-                                             ? log_t::FORMAT_ENC_10_5
-                                             : log_t::FORMAT_10_5);
-  mach_write_to_4(p + LOG_HEADER_SUBFORMAT, 2);
-  mach_write_to_4(p + LOG_HEADER_START_LSN, 0);
-  strcpy(reinterpret_cast<char *>(p) + LOG_HEADER_CREATOR,
-         LOG_HEADER_CREATOR_CURRENT);
-  log_block_store_checksum(p);
+
+  mach_write_to_4(p + log_header::FORMAT, log_sys.log.format);
+  mach_write_to_4(p + log_header::KEY_VERSION, log_sys.log.key_version);
+  /* Write sequence_bit=1 so that the all-zero ib_logdata file will
+  appear empty. */
+  mach_write_to_8(p + log_header::SIZE, 1ULL << 47 | srv_log_file_size);
+  memcpy(p + log_header::CREATOR, log_header::CREATOR_CURRENT,
+         sizeof log_header::CREATOR_CURRENT);
+  static_assert(log_header::CREATOR_END - log_header::CREATOR ==
+                sizeof log_header::CREATOR_CURRENT, "compatibility");
+  log_block_set_checksum(p, log_block_calc_checksum_crc32(p));
+
   return header;
 }
 

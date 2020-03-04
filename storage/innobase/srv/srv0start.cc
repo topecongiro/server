@@ -322,20 +322,10 @@ static dberr_t create_log_file(lsn_t lsn, std::string& logfile0)
   static_assert(!(OS_FILE_LOG_BLOCK_SIZE & 511), "compatibility");
   ut_ad(srv_log_file_size <= 1ULL << 47);
 
-  byte *buf= log_sys.buf;
-  memset_aligned<OS_FILE_LOG_BLOCK_SIZE>(buf, 0, OS_FILE_LOG_BLOCK_SIZE);
-  mach_write_to_4(buf + log_header::FORMAT, log_sys.log.format);
-  mach_write_to_4(buf + log_header::KEY_VERSION, log_sys.log.key_version);
-  /* Write sequence_bit=1 so that the all-zero ib_logdata file will
-  appear empty. */
-  mach_write_to_8(buf + log_header::SIZE, 1ULL << 47 | srv_log_file_size);
-  memcpy(buf + log_header::CREATOR, log_header::CREATOR_CURRENT,
-         sizeof log_header::CREATOR_CURRENT);
-  static_assert(log_header::CREATOR_END - log_header::CREATOR ==
-                sizeof log_header::CREATOR_CURRENT, "compatibility");
-  log_block_set_checksum(buf, log_block_calc_checksum_crc32(buf));
-  buf+= 512;
+  if (dberr_t err= log_sys.append(redo::redo_t::get_header()))
+    return err;
 
+  byte *buf= log_sys.buf;
   /* Write FILE_ID records for any non-predefined tablespaces. */
   mutex_enter(&fil_system.mutex);
   for (fil_space_t *space= UT_LIST_GET_FIRST(fil_system.space_list); space;
