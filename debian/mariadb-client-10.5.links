@@ -5,7 +5,6 @@ usr/bin/mariadb-waitpid usr/bin/mysql_waitpid
 usr/bin/mariadb-access usr/bin/mysqlaccess
 usr/bin/mariadb-admin usr/bin/mysqladmin
 usr/bin/mariadb-binlog usr/bin/mysqlbinlog
-usr/bin/mariadb-check usr/bin/mysqlcheck
 usr/bin/mariadb-check usr/bin/mariadb-analyze
 usr/bin/mariadb-check usr/bin/mariadb-optimize
 usr/bin/mariadb-check usr/bin/mariadb-repair

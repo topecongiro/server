@@ -498,7 +498,7 @@ IF(WIN32)
     DEPENDS comp_sql ${my_bootstrap_sql}
   )
 
-  MYSQL_ADD_EXECUTABLE(mysql_install_db 
+  MYSQL_ADD_EXECUTABLE(mariadb-install-db 
     mysql_install_db.cc
     ${CMAKE_CURRENT_BINARY_DIR}/mysql_bootstrap_sql.c
     COMPONENT Server
@@ -509,7 +509,7 @@ IF(WIN32)
   ADD_LIBRARY(winservice STATIC winservice.c)
   TARGET_LINK_LIBRARIES(winservice shell32)
 
-  MYSQL_ADD_EXECUTABLE(mysql_upgrade_service
+  MYSQL_ADD_EXECUTABLE(mariadb-upgrade-service
     mysql_upgrade_service.cc
     upgrade_conf_file.cc
     COMPONENT Server)

@@ -71,5 +71,10 @@ macro(CREATE_MARIADB_SYMLINK_IN_DIR_PREFIX dest src dir comp target_prefix depen
       COMMENT "Creating ${src} symlink")
 
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${src} DESTINATION ${dir} COMPONENT ${comp})
+  elseif(CMAKE_HOST_WIN32)
+    add_custom_target(${target_prefix}_${src} ALL ${CMAKE_COMMAND} -E create_symlink ${dest}.exe ${CMAKE_CFG_INTDIR}/${src}.exe
+      DEPENDS ${depends}.exe
+      COMMENT "Creating ${src}.exe symlink")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/${src}.exe" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}" COMPONENT ${comp})
   endif()
 endmacro(CREATE_MARIADB_SYMLINK_IN_DIR_PREFIX)

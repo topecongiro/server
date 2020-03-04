@@ -17,9 +17,9 @@
 # Build comp_sql - used for embedding SQL in C or C++ programs
 
 IF(NOT CMAKE_CROSSCOMPILING)
- INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/include)
- ADD_EXECUTABLE(comp_sql comp_sql.c)
- TARGET_LINK_LIBRARIES(comp_sql)
+  INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR}/include)
+  ADD_EXECUTABLE(comp_sql comp_sql.c)
+  TARGET_LINK_LIBRARIES(comp_sql)
 ENDIF()
 
 # Build mysql_fix_privilege_tables.sql (concatenate 3 sql scripts)
@@ -224,10 +224,10 @@ ELSE()
   SET(TARGET_LINUX "false")
 ENDIF()
 
-SET(mysql_config_COMPONENT COMPONENT Development)
-SET(msql2mysql_COMPONENT COMPONENT Client)
-SET(mysqlaccess_COMPONENT COMPONENT Client)
-SET(mysql_find_rows_COMPONENT COMPONENT Client)
+SET(mysql_config_COMPONENT Development)
+SET(msql2mysql_COMPONENT Client)
+SET(mysqlaccess_COMPONENT Client)
+SET(mysql_find_rows_COMPONENT Client)
 SET(mytop_COMPONENT Mytop)
 
 IF(WIN32)
@@ -320,18 +320,23 @@ ELSE()
       # macro does an INSTALL(PROGRAMS ..) that automatically sets +x on
       # the executable.
       EXECUTE_PROCESS(COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/${file})
+   
       IF(NOT ${file}_COMPONENT)
         SET(${file}_COMPONENT Server)
+        message(STATUS "***** " ${file}_COMPONENT ${${file}_COMPONENT})
       ENDIF()
+
       INSTALL_SCRIPT(
         ${CMAKE_CURRENT_BINARY_DIR}/${file}
         DESTINATION ${INSTALL_BINDIR}
         COMPONENT ${${file}_COMPONENT}
       )
+
       # Create symlink
       ADD_CUSTOM_COMMAND(OUTPUT ${binname} COMMAND ${CMAKE_COMMAND} ARGS -E create_symlink ${file} ${binname})
       ADD_CUSTOM_TARGET(symscript_${binname} ALL DEPENDS ${binname})
-      INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${binname} DESTINATION ${INSTALL_BINDIR} COMPONENT Server)
+      INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${binname} DESTINATION ${INSTALL_BINDIR} COMPONENT ${${file}_COMPONENT})
+      message(STATUS "##### " ${CMAKE_CURRENT_BINARY_DIR}/${binname} " DESTINATION " ${INSTALL_BINDIR} " COMPONENT " ${${file}_COMPONENT})
     endif()
   ENDFOREACH()
 
