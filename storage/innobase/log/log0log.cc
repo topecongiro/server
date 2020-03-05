@@ -2025,15 +2025,13 @@ struct mtr_functor_t
   }
 };
 
-dberr_t redo_t::append_mtr_data(const mtr_buf_t &payload)
+dberr_t redo_t::append_mtr_data(const mtr_buf_t &payload,
+                                size_t &bytes_written)
 {
   const uint32_t size= payload.size() + /* crc32 */ 4;
 
   std::array<byte, 9> buf; // 9 bytes will be enough for everyone
-  span<byte> header{
-      buf.begin(),
-      mlog_encode_varint(buf.data(),
-                         size << 2 /* no skip_bit, no sequence_bit */)};
+  span<byte> header= encode_data_header(buf, size, 0, 0);
 
   mtr_functor_t accumulator;
   std::vector<byte> &v= accumulator.m_buf;
@@ -2048,11 +2046,68 @@ dberr_t redo_t::append_mtr_data(const mtr_buf_t &payload)
 
   // now with real sequence bit (which is mutex protected)
   const byte skip_bit= 0; // do not skip
-  const byte *header_end=
-      mlog_encode_varint(v.data(), size << 2 | skip_bit << 1 | m_sequence_bit);
-  (void) header_end;
-  ut_ad(header.size() == static_cast<size_t>(header_end - v.data()));
-  return append_wrapped(v);
+  span<byte> header2= encode_data_header(v, size, 0, m_sequence_bit);
+  (void)header2;
+  ut_ad(header.size() == header2.size());
+  bytes_written= v.size();
+  //return append_wrapped(v);
+
+  // testing decoding...
+  os_offset_t pos = m_data_file_position;
+  byte expected_sequence_bit= m_sequence_bit;
+
+  if (dberr_t err= append_wrapped(v))
+    return err;
+
+  std::vector<byte> buf2;
+  span<byte> read_payload;
+  ut_a(read_mtr_data(pos, buf2, read_payload, expected_sequence_bit) ==
+       DB_SUCCESS);
+  ut_a(pos == m_data_file_position);
+  ut_a(expected_sequence_bit == m_sequence_bit);
+
+  return DB_SUCCESS;
+}
+
+struct mtr_functor_alternative_t
+{
+  byte *m_buf;
+  byte *m_end;
+
+  bool operator()(const mtr_buf_t::block_t *block)
+  {
+    memcpy(m_buf, block->begin(), block->used());
+    m_end+= block->used();
+    return true;
+  }
+};
+
+dberr_t redo_t::append_mtr_data2(const mtr_buf_t &payload,
+                                 size_t &bytes_written)
+{
+  std::lock_guard<std::mutex> _(m_mutex);
+
+  const uint32_t size= payload.size() + /* crc32 */ 4;
+  byte *p= log_sys.buf;
+
+  span<byte> header= encode_data_header({p, 9}, size, 0, 0);
+  p+= header.size();
+
+  if (UNIV_UNLIKELY(header.size() + size > srv_log_buffer_size))
+    return DB_OUT_OF_MEMORY;
+
+  mtr_functor_alternative_t accumulator{p, p};
+  payload.for_each_block(accumulator);
+  p= accumulator.m_end;
+  mach_write_to_4(p, ut_crc32(log_sys.buf, p - log_sys.buf));
+  p+= 4;
+
+  const byte skip_bit= 0; // do not skip
+  auto header2= encode_data_header({log_sys.buf, 9}, size, 0, m_sequence_bit);
+  (void)header2;
+  ut_ad(header.size() == header2.size());
+  bytes_written= p - log_sys.buf;
+  return append_wrapped({log_sys.buf, p});
 }
 
 dberr_t redo_t::append_checkpoint_durable(lsn_t lsn)
@@ -2084,6 +2139,113 @@ dberr_t redo_t::append_file_operations_durable(span<const byte> buf)
 
   return DB_SUCCESS;
 }
+
+dberr_t redo_t::read_mtr_data(os_offset_t &pos, std::vector<byte> &buf,
+                              span<byte> &payload, byte &expected_sequence_bit)
+{
+  buf.resize(std::max(buf.size(), static_cast<size_t>(512)));
+
+  if (dberr_t err= read_wrapped(pos, {buf.data(), 9}))
+    return err;
+
+  size_t size;
+  byte skip_bit, sequence_bit;
+  std::tie(size, skip_bit, sequence_bit)= decode_data_header(buf.data());
+
+  if (expected_sequence_bit != sequence_bit)
+    return DB_CORRUPTION; // or just the end of log
+
+  const size_t header_size= mlog_decode_varint_length(buf[0]);
+
+  if (skip_bit)
+  {
+    payload= {};
+  }
+  else
+  {
+    buf.resize(std::max(buf.size(), header_size + size));
+
+    if (dberr_t err=
+            read_wrapped(pos + header_size, {buf.data() + header_size, size}))
+    {
+      return err;
+    }
+
+    encode_data_header(buf, size, 0, 0);
+    if (ut_crc32(buf.data(), header_size + size - 4) !=
+        mach_read_from_4(buf.data() + header_size + size - 4))
+      return DB_CORRUPTION;
+
+    payload= span<byte>(buf.data() + header_size, size - 4);
+  }
+
+  pos+= header_size + size;
+  if (pos >= m_data_file_size)
+    expected_sequence_bit= expected_sequence_bit == 1 ? 0 : 0;
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::read_mtr_data2(os_offset_t &pos, span<byte> &payload,
+                               byte &expected_sequence_bit)
+{
+  byte *p = log_sys.buf;
+
+  if (dberr_t err= read_wrapped(pos, {p, 9}))
+    return err;
+
+  size_t size;
+  byte skip_bit, sequence_bit;
+  std::tie(size, skip_bit, sequence_bit)= decode_data_header(p);
+
+  if (expected_sequence_bit != sequence_bit)
+    return DB_CORRUPTION; // or just the end of log
+
+  const size_t header_size= mlog_decode_varint_length(p[0]);
+
+  if (skip_bit)
+  {
+    payload= {};
+  }
+  else
+  {
+    if (UNIV_UNLIKELY(header_size + size > srv_log_buffer_size))
+      return DB_OUT_OF_MEMORY;
+
+    if (dberr_t err= read_wrapped(pos + header_size, {p + header_size, size}))
+      return err;
+
+    encode_data_header({p, 9}, size, 0, 0);
+    if (ut_crc32(p, header_size + size - 4) !=
+        mach_read_from_4(p + header_size + size - 4))
+      return DB_CORRUPTION;
+
+    payload= span<byte>(p + header_size, size - 4);
+  }
+
+  pos+= header_size + size;
+  if (pos >= m_data_file_size)
+    expected_sequence_bit= expected_sequence_bit == 1 ? 0 : 0;
+  return DB_SUCCESS;
+}
+
+span<byte> redo_t::encode_data_header(span<byte> buf, size_t size,
+                                      byte skip_bit, byte sequence_bit)
+{
+  span<byte> result{buf.begin(),
+                    mlog_encode_varint(buf.begin(), size << 2 | skip_bit << 1 |
+                                                        sequence_bit)};
+  ut_ad(result.size() <= buf.size());
+  return result;
+}
+
+std::tuple<size_t, byte, byte> redo_t::decode_data_header(byte *buf)
+{
+  auto decoded= mlog_decode_varint(buf);
+  byte skip_bit= (decoded & 2) >> 1;
+  byte sequence_bit= decoded & 1;
+  return {decoded >> 2, skip_bit, sequence_bit};
+}
+
 
 dberr_t redo_t::append_checkpoint_durable_impl(log_file_t &file,
                                                os_offset_t tail,
@@ -2135,7 +2297,10 @@ dberr_t redo_t::append_wrapped(span<byte> buf)
 
   m_data_file_position+= buf.size();
   if (m_data_file_position == m_data_file_size)
+  {
     m_data_file_position= 0;
+    flip_sequence_bit();
+  }
 
   return DB_SUCCESS;
 }
@@ -2158,6 +2323,34 @@ dberr_t redo_t::read_wrapped(os_offset_t offset, span<byte> buf)
   if (dberr_t err= m_data_file.read(offset, buf))
     return err;
 
+  return DB_SUCCESS;
+}
+
+dberr_t redo_t::skip_bytes(size_t size)
+{
+  constexpr byte skip_bit= 1;
+  std::array<byte, 9> buf;
+
+  for (const auto tail_size :
+       {size - 1, size - 2, size - 3, size - 4, size - 5})
+  {
+    auto header= encode_data_header(buf, tail_size, skip_bit, m_sequence_bit);
+    if (header.size() + tail_size != size)
+      continue;
+
+    if (dberr_t err= append_wrapped(header))
+      return err;
+
+    m_data_file_position+= tail_size;
+    if (m_data_file_position >= m_data_file_size)
+    {
+      m_data_file_position%= m_data_file_size;
+      flip_sequence_bit();
+    }
+    return DB_SUCCESS;
+  }
+
+  ut_ad(0 && "unreachable");
   return DB_SUCCESS;
 }
 

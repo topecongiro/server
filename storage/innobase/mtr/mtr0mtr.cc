@@ -560,7 +560,9 @@ inline lsn_t mtr_t::finish_write(ulint len)
 	ut_ad(m_log.size() == len);
 	ut_ad(len > 0);
 
-	ut_a(redo::new_redo.append_mtr_data(m_log) == DB_SUCCESS);
+	size_t bytes_written;
+	ut_a(redo::new_redo.append_mtr_data(m_log, bytes_written) ==
+             DB_SUCCESS);
 
 	lsn_t start_lsn;
 

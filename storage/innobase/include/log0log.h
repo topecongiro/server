@@ -914,18 +914,26 @@ public:
   /** Thread unsafe! */
   dberr_t close_files();
 
-  dberr_t append_mtr_data(const mtr_buf_t &payload);
+  dberr_t append_mtr_data(const mtr_buf_t &payload, size_t &bytes_written);
+  dberr_t append_mtr_data2(const mtr_buf_t &payload, size_t &bytes_written);
   /** Calls fdatasync() or similar */
   dberr_t flush_data() { return m_data_file.flush_data_only(); }
 
   dberr_t append_checkpoint_durable(lsn_t lsn);
   dberr_t append_file_operations_durable(span<const byte> buf);
 
-  /** skip_bit = 1 */
-  dberr_t skip_bytes(size_t size) { return DB_SUCCESS; }
+  dberr_t read_mtr_data(os_offset_t &pos, std::vector<byte> &buf,
+                        span<byte> &payload, byte &expected_sequence_bit);
+  dberr_t read_mtr_data2(os_offset_t &pos, span<byte> &payload,
+                         byte &expected_sequence_bit);
 
 private:
   void flip_sequence_bit() { m_sequence_bit= ~m_sequence_bit; }
+
+  static span<byte> encode_data_header(span<byte> buf, size_t size,
+                                       byte skip_bit, byte sequence_bit);
+
+  static std::tuple<size_t, byte, byte> decode_data_header(byte* buf);
 
   static dberr_t append_checkpoint_durable_impl(log_file_t &file,
                                                 os_offset_t tail,
@@ -933,8 +941,12 @@ private:
                                                 os_offset_t data_file_offset,
                                                 byte sequence_bit);
 
+  /** Copies buf to a file, handling wrap around and sequence_bit */
   dberr_t append_wrapped(span<byte> buf);
   dberr_t read_wrapped(os_offset_t offset, span<byte> buf);
+
+  /** Not thread safe. */
+  dberr_t skip_bytes(size_t size);
 };
 
 extern redo_t new_redo;
